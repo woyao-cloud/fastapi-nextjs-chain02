@@ -382,28 +382,6 @@ CREATE TABLE user_sessions (
 2. **多设备登录**: 允许同时多个会话
 3. **有限设备登录**: 限制最大会话数（如5个）
 
-**实现方式**:
-```python
-class SessionManager:
-    def create_session(self, user_id, device_info, ip_address):
-        # 检查并发会话限制
-        active_sessions = self.get_active_sessions(user_id)
-
-        if self.MAX_SESSIONS_PER_USER and \
-           len(active_sessions) >= self.MAX_SESSIONS_PER_USER:
-            # 终止最旧的会话
-            oldest_session = min(active_sessions, key=lambda s: s.last_activity_at)
-            self.revoke_session(oldest_session.id)
-
-        # 创建新会话
-        session = UserSession(
-            user_id=user_id,
-            device_info=device_info,
-            ip_address=ip_address,
-            expires_at=datetime.utcnow() + timedelta(days=7)
-        )
-        # ... 保存会话
-```
 
 ## 安全防护
 
@@ -456,18 +434,7 @@ class SessionManager:
 - 密码重置：3次/小时（每用户）
 - API端点：1000次/小时（每用户）
 
-**实现方式**:
-```python
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 
-limiter = Limiter(key_func=get_remote_address)
-
-@app.post("/auth/login")
-@limiter.limit("10/hour")
-async def login(request: Request):
-    # 登录逻辑
-```
 
 ## OAuth2 集成
 
@@ -501,83 +468,7 @@ async def login(request: Request):
 
 ### 3. OAuth2 用户映射
 
-```python
-class OAuth2UserMapper:
-    def map_user(self, provider, oauth_user_data):
-        # 查找现有用户
-        user = self.find_user_by_oauth_id(provider, oauth_user_data.id)
 
-        if not user:
-            # 查找通过邮箱（如果提供商已验证邮箱）
-            if oauth_user_data.verified_email:
-                user = self.find_user_by_email(oauth_user_data.email)
-
-            if not user:
-                # 创建新用户
-                user = self.create_user_from_oauth(provider, oauth_user_data)
-
-        # 更新OAuth关联
-        self.update_oauth_connection(user, provider, oauth_user_data)
-
-        return user
-```
-
-## 多因素认证（MFA）
-
-### 1. 支持的 MFA 方法
-
-1. **TOTP（基于时间的一次性密码）**
-   - 使用 Google Authenticator 或类似应用
-   - 6位数字，30秒有效期
-
-2. **短信验证码**
-   - 通过短信发送6位验证码
-   - 5分钟有效期
-
-3. **邮箱验证码**
-   - 通过邮箱发送6位验证码
-   - 10分钟有效期
-
-4. **安全密钥（WebAuthn）**
-   - 硬件安全密钥或生物识别
-   - FIDO2/WebAuthn 标准
-
-### 2. MFA 启用流程
-
-```
-1. 用户登录后访问安全设置
-   ↓
-2. 选择启用MFA方法（如TOTP）
-   ↓
-3. 生成密钥并显示二维码
-   ↓
-4. 用户使用验证器应用扫描
-   ↓
-5. 输入验证码确认设置
-   ↓
-6. 保存恢复代码（紧急使用）
-   ↓
-7. MFA启用成功
-```
-
-### 3. MFA 验证流程
-
-```
-1. 用户使用用户名密码登录
-   ↓
-2. 检查用户是否启用MFA
-   ↓
-3. 如果启用MFA：
-   a. 要求输入MFA验证码
-   b. 验证TOTP代码或短信验证码
-   c. 如果验证失败，记录尝试次数
-   ↓
-4. 如果验证成功：
-   a. 生成访问令牌
-   b. 标记此次登录已验证MFA
-   ↓
-5. 如果未启用MFA：直接生成令牌
-```
 
 ## 审计和日志
 
@@ -593,25 +484,6 @@ class OAuth2UserMapper:
 - 会话创建/销毁
 - MFA启用/禁用
 - OAuth2登录
-
-**日志字段**:
-```json
-{
-  "event": "user_login",
-  "user_id": "550e8400-e29b-41d4-a716-446655440000",
-  "username": "john_doe",
-  "success": true,
-  "ip_address": "192.168.1.100",
-  "user_agent": "Mozilla/5.0...",
-  "device_fingerprint": "device_hash_123",
-  "timestamp": "2024-01-01T10:30:00Z",
-  "metadata": {
-    "mfa_used": true,
-    "mfa_method": "totp",
-    "session_id": "880e8400-e29b-41d4-a716-446655440003"
-  }
-}
-```
 
 ### 2. 可疑活动检测
 
@@ -632,138 +504,12 @@ class OAuth2UserMapper:
 
 ### 1. 令牌存储策略
 
-```typescript
-class TokenManager {
-  // 存储访问令牌（安全存储）
-  setAccessToken(token: string): void {
-    // 使用内存存储或安全本地存储
-    sessionStorage.setItem('access_token', token);
-  }
-
-  // 存储刷新令牌（更安全的方式）
-  setRefreshToken(token: string): void {
-    // 使用HttpOnly Cookie（后端设置）
-    // 或安全本地存储
-    localStorage.setItem('refresh_token', token);
-  }
-
-  // 获取令牌
-  getAccessToken(): string | null {
-    return sessionStorage.getItem('access_token');
-  }
-
-  // 清除令牌
-  clearTokens(): void {
-    sessionStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    // 通知后端撤销令牌
-  }
-}
-```
 
 ### 2. 自动令牌刷新
 
-```typescript
-class AuthInterceptor {
-  private isRefreshing = false;
-  private failedQueue: Array<{
-    resolve: (value: any) => void;
-    reject: (reason?: any) => void;
-  }> = [];
-
-  intercept(request: AxiosRequestConfig): Promise<AxiosRequestConfig> {
-    const token = tokenManager.getAccessToken();
-
-    if (token) {
-      request.headers.Authorization = `Bearer ${token}`;
-    }
-
-    return Promise.resolve(request);
-  }
-
-  handleError(error: AxiosError): Promise<any> {
-    const originalRequest = error.config;
-
-    // 如果是401错误且不是刷新令牌的请求
-    if (error.response?.status === 401 &&
-        !originalRequest.url?.includes('/auth/refresh')) {
-
-      if (this.isRefreshing) {
-        // 加入队列等待刷新完成
-        return new Promise((resolve, reject) => {
-          this.failedQueue.push({ resolve, reject });
-        })
-          .then(() => this.retryRequest(originalRequest))
-          .catch((err) => Promise.reject(err));
-      }
-
-      this.isRefreshing = true;
-
-      return authService.refreshToken()
-        .then(({ access_token }) => {
-          tokenManager.setAccessToken(access_token);
-
-          // 重试所有失败的请求
-          this.failedQueue.forEach((promise) => promise.resolve());
-          this.failedQueue = [];
-
-          return this.retryRequest(originalRequest);
-        })
-        .catch((refreshError) => {
-          // 刷新失败，清理并重定向到登录页
-          this.failedQueue.forEach((promise) => promise.reject(refreshError));
-          this.failedQueue = [];
-
-          tokenManager.clearTokens();
-          window.location.href = '/login';
-
-          return Promise.reject(refreshError);
-        })
-        .finally(() => {
-          this.isRefreshing = false;
-        });
-    }
-
-    return Promise.reject(error);
-  }
-}
-```
 
 ### 3. 路由保护
 
-```typescript
-// 路由中间件（Next.js）
-export function requireAuth(redirectTo = '/login') {
-  return async (context: GetServerSidePropsContext) => {
-    const token = context.req.cookies.access_token;
-
-    if (!token) {
-      return {
-        redirect: {
-          destination: redirectTo,
-          permanent: false,
-        },
-      };
-    }
-
-    try {
-      // 验证令牌有效性
-      const user = await authService.verifyToken(token);
-
-      return {
-        props: { user },
-      };
-    } catch (error) {
-      return {
-        redirect: {
-          destination: redirectTo,
-          permanent: false,
-        },
-      };
-    }
-  };
-}
-```
 
 ## 测试策略
 
@@ -775,25 +521,6 @@ export function requireAuth(redirectTo = '/login') {
 - 权限检查逻辑
 - 会话管理操作
 
-**示例测试**:
-```python
-def test_password_hashing():
-    password = "SecurePassword123!"
-    hashed = hash_password(password)
-
-    # 验证密码
-    assert verify_password(password, hashed) == True
-    assert verify_password("WrongPassword", hashed) == False
-
-def test_token_generation():
-    user = User(id=1, username="test")
-    token = generate_access_token(user)
-
-    # 验证令牌
-    payload = verify_token(token)
-    assert payload["sub"] == "1"
-    assert payload["username"] == "test"
-```
 
 ### 2. 集成测试
 
@@ -803,31 +530,6 @@ def test_token_generation():
 - 权限验证流程
 - 并发会话管理
 - OAuth2集成流程
-
-**示例测试**:
-```python
-def test_login_flow(client, test_user):
-    # 登录请求
-    response = client.post("/auth/login", json={
-        "username": test_user.username,
-        "password": "test_password"
-    })
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # 验证响应包含令牌
-    assert "access_token" in data
-    assert "refresh_token" in data
-    assert "user" in data
-
-    # 使用令牌访问受保护端点
-    headers = {"Authorization": f"Bearer {data['access_token']}"}
-    response = client.get("/auth/me", headers=headers)
-
-    assert response.status_code == 200
-    assert response.json()["username"] == test_user.username
-```
 
 ### 3. 安全测试
 
@@ -843,78 +545,10 @@ def test_login_flow(client, test_user):
 
 ### 1. 环境变量配置
 
-```bash
-# 认证配置
-JWT_SECRET_KEY=your-super-secret-key-change-in-production
-JWT_ALGORITHM=HS256
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# 密码安全
-BCRYPT_ROUNDS=12
-PASSWORD_MIN_LENGTH=8
-MAX_LOGIN_ATTEMPTS=5
-ACCOUNT_LOCKOUT_MINUTES=15
-
-# OAuth2 配置
-GOOGLE_OAUTH_CLIENT_ID=your-google-client-id
-GOOGLE_OAUTH_CLIENT_SECRET=your-google-client-secret
-GITHUB_OAUTH_CLIENT_ID=your-github-client-id
-GITHUB_OAUTH_CLIENT_SECRET=your-github-client-secret
-
-# 会话配置
-SESSION_TIMEOUT_MINUTES=30
-MAX_SESSIONS_PER_USER=5
-ALLOW_CONCURRENT_SESSIONS=true
-
-# 安全头
-ENABLE_CSP=true
-ENABLE_HSTS=true
-ENABLE_XSS_PROTECTION=true
-```
 
 ### 2. 安全头配置
 
-```python
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from starlette.middleware.cors import CORSMiddleware
-
-app.add_middleware(HTTPSRedirectMiddleware)  # 强制HTTPS
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["example.com"])  # 主机验证
-
-# CORS配置
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://frontend.example.com"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining"]
-)
-
-# 安全头中间件
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    response = await call_next(request)
-
-    # 添加安全头
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-
-    # CSP头（内容安全策略）
-    response.headers["Content-Security-Policy"] = \
-        "default-src 'self'; " \
-        "script-src 'self' 'unsafe-inline' https://cdn.example.com; " \
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " \
-        "img-src 'self' data: https://*.example.com; " \
-        "font-src 'self' https://fonts.gstatic.com; " \
-        "connect-src 'self' https://api.example.com;"
-
-    return response
-```
 
 ## 故障排除
 
